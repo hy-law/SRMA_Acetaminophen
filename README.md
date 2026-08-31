@@ -3,7 +3,6 @@
 Supporting dataset for the systematic review, meta-analysis, subgroup analysis and trial sequential analysis of randomised trials of **intravenous versus oral perioperative acetaminophen** for postoperative acute pain in adults.
 
 | | |
-|---|---|
 | PROSPERO | [CRD420251157230](https://www.crd.york.ac.uk/prospero/display_record.php?ID=CRD420251157230) |
 | Dataset file | [`Acetaminophen_IV_vs_PO_DataExtraction.xlsx`](Acetaminophen_IV_vs_PO_DataExtraction.xlsx) |
 | Version | 1.2 (1 July 2026) |
