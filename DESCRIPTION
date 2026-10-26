@@ -1,0 +1,22 @@
+Package: SRMA.Acetaminophen.R1
+Title: Analysis code for IV vs oral perioperative acetaminophen SRMA (BMC Anesthesiology)
+Version: 1.0.0
+Authors@R: person("Hei Yeung", "Law", role = c("aut", "cre"),
+                  email = "LHY624@ha.org.hk")
+License: MIT + file LICENSE
+Depends: R (>= 4.3)
+Imports:
+    meta,
+    metafor,
+    RTSA,
+    readxl,
+    dplyr,
+    tidyr,
+    stringr,
+    ggplot2
+Suggests:
+    patchwork,
+    robvis,
+    magick,
+    pdftools
+Encoding: UTF-8

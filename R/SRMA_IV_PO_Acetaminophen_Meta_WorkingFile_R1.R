@@ -2,7 +2,8 @@
 # Intravenous versus oral perioperative acetaminophen for postoperative acute pain management in adults
 # A systematic review, meta-analysis, subgroup analysis and trial sequential analysis of randomized controlled trials
 #
-# Date: [2026-06-30]
+# R1 revision WorkingFile (REML+HK; Fig5 RE DL+HKSJ). Prefer R/run_R1_full_package.R for batch.
+# Date: [2026-10-20]
 # R version: 4.5.2
 #
 # License: MIT (see LICENSE file in repository root)
@@ -31,56 +32,74 @@
 # For questions or collaboration: henrylawheiyeung@gmail.com
 # =============================================================================
 
-install.packages("meta")
-install.packages("metafor")
-install.packages("metaviz")
-install.packages("forestploter")
-install.packages("readxl")
-install.packages("dplyr")
-install.packages("tidyr")
-install.packages("stringr")
-install.packages("ggplot2")
-install.packages("patchwork")
-install.packages("robvis")
-install.packages("magick")
-install.packages("pdftools")
-install.packages("RTSA")
-install.packages("tidyverse")
+# ---- Path configuration (GitHub-ready) ----------------------------------------
+# Set PROJECT_ROOT to the folder that contains the revision workbook, or:
+#   Sys.setenv(SRMA_PROJECT_ROOT = "/path/to/project")
+# Prefer sourcing the modular runners in R/ for reproducible R1 figures;
+# this WorkingFile is the interactive / full-script companion.
+if (!exists("PROJECT_ROOT") || is.null(PROJECT_ROOT) || !nzchar(as.character(PROJECT_ROOT)[1])) {
+  env <- Sys.getenv("SRMA_PROJECT_ROOT", unset = "")
+  if (nzchar(env) && dir.exists(env)) {
+    PROJECT_ROOT <- normalizePath(env, winslash = "/", mustWork = TRUE)
+  } else if (file.exists("Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx")) {
+    PROJECT_ROOT <- normalizePath(".", winslash = "/", mustWork = TRUE)
+  } else if (file.exists("../Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx")) {
+    PROJECT_ROOT <- normalizePath("..", winslash = "/", mustWork = TRUE)
+  } else {
+    PROJECT_ROOT <- normalizePath(".", winslash = "/", mustWork = FALSE)
+  }
+}
+XLSX_PATH <- file.path(PROJECT_ROOT, "Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx")
+if (!file.exists(XLSX_PATH)) {
+  stop("Workbook not found at ", XLSX_PATH,
+       " — set PROJECT_ROOT / SRMA_PROJECT_ROOT", call. = FALSE)
+}
+setwd(PROJECT_ROOT)  # WorkingFile writes figures to cwd by design
+.libPaths(unique(c(path.expand("~/R/library"), .libPaths())))
+
+
+# Packages — core only (optional viz packages soft-loaded; no mass install)
+.libPaths(c(path.expand("~/R/library"), .libPaths()))
+.r1_core <- c("meta","metafor","readxl","dplyr","tidyr","stringr","ggplot2","RTSA")
+for (.p in .r1_core) {
+  if (!requireNamespace(.p, quietly = TRUE))
+    install.packages(.p, lib = path.expand("~/R/library"), repos = "https://cloud.r-project.org")
+}
+rm(.p, .r1_core)
 
 library(meta)
 library(metafor)
-library(metaviz)
-library(forestploter)
 library(readxl)
 library(dplyr)
 library(tidyr)
 library(stringr)
 library(ggplot2)
-library(patchwork)
 library(grid)
-library(robvis)
-library(magick)
-library(pdftools)
 library(RTSA)
-library(tidyverse)
+# Optional (skip if missing — not required for forest/subgroup/TSA)
+for (.p in c("patchwork","robvis","magick","pdftools","metaviz","forestploter")) {
+  if (requireNamespace(.p, quietly = TRUE)) library(.p, character.only = TRUE)
+}
+rm(.p)
 
 # Confirm all sheets
-excel_sheets("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx")
+excel_sheets(XLSX_PATH)
 
 # Import all sheets
-dat_list <- lapply(excel_sheets("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx"), 
-                   function(sheet) read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", sheet = sheet))
+dat_list <- lapply(excel_sheets(XLSX_PATH),
+                   function(sheet) read_excel(XLSX_PATH, sheet = sheet))
 
-names(dat_list) <- excel_sheets("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx")
+names(dat_list) <- excel_sheets(XLSX_PATH)
 
-# Assign to individual data frames
-study_char   <- dat_list[[1]]
-rob          <- dat_list[[2]]
-pain_rest    <- dat_list[[3]]
-pain_move    <- dat_list[[4]]
-opioid_mme   <- dat_list[[5]]
-ponv         <- dat_list[[6]]
-other_sec    <- dat_list[[7]]
+# Assign to individual data frames BY SHEET NAME
+# (workbook now starts with DECIDE_Locks, README — never use positional indices)
+study_char   <- dat_list[["Study_Characteristics"]]
+rob          <- dat_list[["Risk_of_Bias"]]
+pain_rest    <- dat_list[["Pain_Scores_Rest"]]
+pain_move    <- dat_list[["Pain_Scores_Movement"]]
+opioid_mme   <- dat_list[["Opioid_Consumption_MME"]]
+ponv         <- dat_list[["PONV"]]
+other_sec    <- dat_list[["Other_Secondaries"]]
 
 # ==========================
 # ===== 1.PAIN AT REST =====
@@ -88,7 +107,7 @@ other_sec    <- dat_list[[7]]
 
 # FUNCTION TO ANALYSE ANY TIME POINT
 analyze_rest_pain <- function(time_prefix, time_label) {
-  
+
   # 1. Extract columns for this time window
   dat <- pain_rest %>%
     select(StudyID, PainScale,
@@ -106,10 +125,10 @@ analyze_rest_pain <- function(time_prefix, time_label) {
       PO_mean_10 = if_else(Scale_Type == "0-100", PO_mean / 10, PO_mean),
       PO_sd_10   = if_else(Scale_Type == "0-100", PO_sd / 10, PO_sd)
     )
-  
+
   cat("\n=== ", time_label, "===\n")
   cat("Number of studies:", nrow(dat), "\n")
-  
+
   # 2. Run meta-analysis (identical settings to primary)
   m <- metacont(n.e   = IV_n,   mean.e = IV_mean_10, sd.e = IV_sd_10,
                 n.c   = PO_n,   mean.c = PO_mean_10, sd.c = PO_sd_10,
@@ -119,18 +138,18 @@ analyze_rest_pain <- function(time_prefix, time_label) {
                 fixed   = FALSE,
                 random  = TRUE,
                 method.tau = "REML",
-                hakn    = TRUE,
-                title   = paste("Pain at Rest", time_label, ": IV vs PO Acetaminophen"))
-  
+                method.random.ci = "HK",
+                title   = paste("Pain at Rest", time_label, ":\nIV vs PO Acetaminophen"))
+
   print(summary(m))
-  
+
   # 3. Forest plot with heading
   pdf(paste0("Forest_PainRest_", time_prefix, "_MD.pdf"), width = 15.5, height = 9.8)
   meta::forest(m,
                smlab = paste("Pain Score at Rest", time_label, ":\nIV vs PO Acetaminophen"),
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
-               label.e = "Intraveous",
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
+               label.e = "Intravenous",
                label.c = "Oral",
                xlab = "Mean Difference (IV minus PO) — lower values favour IV",
                col.square = "#4575b4",
@@ -148,7 +167,7 @@ analyze_rest_pain <- function(time_prefix, time_label) {
                fontsize = 10,
                rows.gr = 2.2)
   dev.off()
-  
+
   return(m)   # save the model object for later use
 }
 
@@ -163,7 +182,7 @@ p1 <- grid.grabExpr({
   meta::forest(m_0to2h,
                smlab = "A. 0–2 Hours",
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
                xlab = "MD (0-10 VAS/NRS)",
                col.square = "#4575b4", col.diamond = "#d73027",
                prediction = TRUE, comb.random = TRUE,
@@ -174,7 +193,7 @@ p2 <- grid.grabExpr({
   meta::forest(m_2to6h,
                smlab = "B. 2–6 Hours",
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
                xlab = "MD (0-10 VAS/NRS)",
                col.square = "#4575b4", col.diamond = "#d73027",
                prediction = TRUE, comb.random = TRUE,
@@ -185,7 +204,7 @@ p3 <- grid.grabExpr({
   meta::forest(m_6to24h,
                smlab = "C. 6–24 Hours",
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
                xlab = "MD (0-10 VAS/NRS)",
                col.square = "#4575b4", col.diamond = "#d73027",
                prediction = TRUE, comb.random = TRUE,
@@ -196,7 +215,7 @@ p4 <- grid.grabExpr({
   meta::forest(m_gt24h,
                smlab = "D. >24 Hours",
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
                xlab = "MD (0-10 VAS/NRS)",
                col.square = "#4575b4", col.diamond = "#d73027",
                prediction = TRUE, comb.random = TRUE,
@@ -204,10 +223,10 @@ p4 <- grid.grabExpr({
 })
 
 # === Combine the four captured plots into ONE figure ===
-combined <- 
-  wrap_elements(full = p1) / 
-  wrap_elements(full = p2) / 
-  wrap_elements(full = p3) / 
+combined <-
+  wrap_elements(full = p1) /
+  wrap_elements(full = p2) /
+  wrap_elements(full = p3) /
   wrap_elements(full = p4) +
   plot_annotation(
     title = "Pain Scores at Rest: Intravenous vs Oral Acetaminophen",
@@ -219,7 +238,7 @@ combined <-
   )
 
 # === Save as high-resolution PDF ===
-ggsave("Figure1_Pain_at_Rest_All_Time_Points_PUBLICATION.pdf", 
+ggsave("Figure1_Pain_at_Rest_All_Time_Points_PUBLICATION.pdf",
        combined, width = 15.5, height = 23, dpi = 800, bg = "white")
 
 
@@ -230,13 +249,13 @@ ggsave("Figure1_Pain_at_Rest_All_Time_Points_PUBLICATION.pdf",
 # Function to run influence analysis and save plot
 run_influence <- function(model, time_label) {
   cat("\n=== Influence Analysis:", time_label, "===\n")
-  
+
   # Leave-one-out meta-analysis
   inf <- metainf(model)
   print(inf)
-  
+
   # Influence forest plot (saved as PDF)
-  pdf(paste0("Influence_PainRest_", time_label, ".pdf"), 
+  pdf(paste0("Influence_PainRest_", time_label, ".pdf"),
       width = 14, height = 9)
   meta::forest(inf,
                smlab = paste("Influence Analysis: ", time_label),
@@ -250,7 +269,7 @@ run_influence <- function(model, time_label) {
                print.I2 = TRUE,
                fs.smlab = 12)
   dev.off()
-  
+
   return(inf)
 }
 
@@ -264,13 +283,13 @@ inf_6to24h  <- run_influence(m_6to24h,  "6–24hrs")
 # ==============================================
 
 # Load the opioid sheet
-opioid_mme <- read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", 
-                         sheet = 5, col_names = TRUE)
+opioid_mme <- read_excel(XLSX_PATH,
+                         sheet = "Opioid_Consumption_MME", col_names = TRUE)
 
 # 1. Clean to 0–24 h window (handles multiple rows per study)
 opioid_24h <- opioid_mme %>%
   filter(str_detect(TimeWindow_Hours, "0-24")) %>%   # selects all 0-24 h rows
-  select(StudyID, 
+  select(StudyID,
          IV_n = IV_n,
          IV_mean = IV_mean_MME,
          IV_sd   = IV_sd_MME,
@@ -289,15 +308,15 @@ m_opioid <- metacont(n.e   = IV_n,   mean.e = IV_mean, sd.e = IV_sd,
                      fixed   = FALSE,
                      random  = TRUE,
                      method.tau = "REML",
-                     hakn    = TRUE,
-                     title   = "24-h Opioid Consumption (MME): IV vs PO Acetaminophen")
+                     method.random.ci = "HK",
+                     title   = "24-h Opioid Consumption (MME):\nIV vs PO Acetaminophen")
 
 # 3. Publication-ready forest plot with heading
 pdf("Forest_Opioid_MME_0-24h.pdf", width = 15.5, height = 9.8)
 meta::forest(m_opioid,
              smlab = "24h Postop Opioid (MME):\nIV vs PO Acetaminophen",
              leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-             leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+             leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
              xlab = "Mean Difference in MME (IV minus PO)",
              col.square = "#4575b4",
              col.diamond = "#d73027",
@@ -338,12 +357,12 @@ dev.off()
 # ==================================
 
 # Import pain-on-movement sheet
-pain_move <- read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", 
-                        sheet = 4, col_names = TRUE)
+pain_move <- read_excel(XLSX_PATH,
+                        sheet = "Pain_Scores_Movement", col_names = TRUE)
 
 # === FUNCTION FOR PAIN ON MOVEMENT ===
 analyze_move_pain <- function(time_prefix, time_label) {
-  
+
   dat <- pain_move %>%
     select(StudyID, PainScale,
            IV_n   = paste0("Pain_", time_prefix, "_IV_n"),
@@ -360,15 +379,15 @@ analyze_move_pain <- function(time_prefix, time_label) {
       PO_mean_10 = if_else(Scale_Type == "0-100", PO_mean / 10, PO_mean),
       PO_sd_10   = if_else(Scale_Type == "0-100", PO_sd / 10, PO_sd)
     )
-  
+
   cat("\n=== Pain on Movement —", time_label, "===\n")
   cat("Number of studies:", nrow(dat), "\n")
-  
+
   if(nrow(dat) < 2) {
     cat("→ Insufficient studies for meta-analysis (k < 2)\n")
     return(NULL)
   }
-  
+
   m <- metacont(n.e   = IV_n,   mean.e = IV_mean_10, sd.e = IV_sd_10,
                 n.c   = PO_n,   mean.c = PO_mean_10, sd.c = PO_sd_10,
                 studlab = StudyID,
@@ -376,17 +395,17 @@ analyze_move_pain <- function(time_prefix, time_label) {
                 sm      = "MD",
                 random  = TRUE,
                 method.tau = "REML",
-                hakn    = TRUE,
+                method.random.ci = "HK",
                 title   = paste("Pain on Movement", time_label))
-  
+
   print(summary(m))
-  
+
   # Publication forest plot
   pdf(paste0("Forest_PainMove_", time_prefix, "_MD.pdf"), width = 15.5, height = 8)
   meta::forest(m,
                smlab = paste("Pain Score (Movement)", time_label, ":\nIV vs PO Acetaminophen"),
                leftcols = c("studlab", "n.e", "mean.e", "sd.e", "n.c", "mean.c", "sd.c"),
-               leftlabs = c("Study", "N (IV)", "Mean (IV)", "SD (IV)", "N (PO)", "Mean (PO)", "SD (PO)"),
+               leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"),
                xlab = "Mean Difference (IV minus PO) — lower = favours IV",
                col.square = "#4575b4",
                col.diamond = "#d73027",
@@ -394,7 +413,7 @@ analyze_move_pain <- function(time_prefix, time_label) {
                print.tau2 = TRUE,
                print.I2 = TRUE)
   dev.off()
-  
+
   return(m)
 }
 
@@ -410,26 +429,26 @@ m_move_gt24h  <- analyze_move_pain("gt24h",  ">24hrs")
 # ===================
 
 # Import PONV sheet
-ponv <- read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", 
-                   sheet = 6, col_names = TRUE)
+ponv <- read_excel(XLSX_PATH,
+                   sheet = "PONV", col_names = TRUE)
 
 # 1. Clean PONV data (focus on 0-24 h and PACU windows)
 ponv_clean <- ponv %>%
   filter(str_detect(TimeWindow_Hours, "0-24|PACU")) %>%
-  select(StudyID, 
+  select(StudyID,
          PONV_Definition,
-         events.e = IV_events, 
+         events.e = IV_events,
          n.e     = IV_total,
-         events.c = PO_events, 
+         events.c = PO_events,
          n.c     = PO_total) %>%
   filter(!is.na(events.e) & !is.na(n.e) & !is.na(events.c) & !is.na(n.c)) %>%
   mutate(PONV_Definition = replace_na(PONV_Definition, "Unspecified"))
 
 # Split into Nausea and Vomiting
-ponv_nausea <- ponv_clean %>% 
+ponv_nausea <- ponv_clean %>%
   filter(str_detect(PONV_Definition, "Nausea|Unspecified"))
 
-ponv_vomiting <- ponv_clean %>% 
+ponv_vomiting <- ponv_clean %>%
   filter(str_detect(PONV_Definition, "Vomiting"))
 
 cat("Nausea 0–24 h studies:", nrow(ponv_nausea), "\n")
@@ -455,7 +474,7 @@ pdf("Forest_PONV_Nausea_0-24h.pdf", width = 14.5, height = 8)
 meta::forest(m_nausea,
              smlab = "Postop Nausea 0–24h:\nIV vs PO Acetaminophen",
              leftcols = c("studlab", "events.e", "n.e", "events.c", "n.c"),
-             leftlabs = c("Study", "Events (IV)", "N (IV)", "Events (PO)", "N (PO)"),
+             leftlabs = c("Study", "Events (IV)", "Total (IV)", "Events (PO)", "Total (PO)"),
              xlab = "Risk Ratio (IV vs PO)",
              col.square = "#4575b4",
              col.diamond = "#d73027",
@@ -484,7 +503,7 @@ pdf("Forest_PONV_Vomiting_0-24h.pdf", width = 14.5, height = 8)
 meta::forest(m_vomiting,
              smlab = "Postop Vomiting 0–24h:\nIV vs PO Acetaminophen",
              leftcols = c("studlab", "events.e", "n.e", "events.c", "n.c"),
-             leftlabs = c("Study", "Events (IV)", "N (IV)", "Events (PO)", "N (PO)"),
+             leftlabs = c("Study", "Events (IV)", "Total (IV)", "Events (PO)", "Total (PO)"),
              xlab = "Risk Ratio (IV vs PO)",
              col.square = "#4575b4",
              col.diamond = "#d73027",
@@ -498,8 +517,8 @@ dev.off()
 # =================================================
 
 # Import Sheet 7 (all other secondary outcomes)
-other_sec <- read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", 
-                        sheet = 7, col_names = TRUE)
+other_sec <- read_excel(XLSX_PATH,
+                        sheet = "Other_Secondaries", col_names = TRUE)
 
 # 1. PACU Length of Stay (minutes) - continuous
 pacu <- other_sec %>%
@@ -519,11 +538,11 @@ m_pacu <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                    sm = "MD",
                    random = TRUE,
                    method.tau = "REML",
-                   hakn = TRUE)
+                   method.random.ci = "HK")
 
 summary(m_pacu)
 pdf("Forest_PACU_LOS.pdf", width = 15, height = 8)
-meta::forest(m_pacu, smlab = "PACU Length of Stay (minutes):\nIV vs PO Acetaminophen")
+meta::forest(m_pacu, smlab = "PACU Length of Stay (minutes, label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)")):\nIV vs PO Acetaminophen")
 dev.off()
 
 # 2. Hospital Length of Stay (days) - continuous
@@ -544,11 +563,11 @@ m_hosp <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                    sm = "MD",
                    random = TRUE,
                    method.tau = "REML",
-                   hakn = TRUE)
+                   method.random.ci = "HK")
 
 summary(m_hosp)
 pdf("Forest_Hospital_LOS.pdf", width = 15, height = 8)
-meta::forest(m_hosp, smlab = "Hospital Length of Stay (days):\nIV vs PO Acetaminophen")
+meta::forest(m_hosp, smlab = "Hospital Length of Stay (days, label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)")):\nIV vs PO Acetaminophen")
 dev.off()
 
 # 3. Patient Satisfaction score - continuous
@@ -569,11 +588,11 @@ m_sat <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                   sm = "MD",
                   random = TRUE,
                   method.tau = "REML",
-                  hakn = TRUE)
+                  method.random.ci = "HK")
 
 summary(m_sat)
 pdf("Forest_Satisfaction.pdf", width = 15, height = 8)
-meta::forest(m_sat, smlab = "Patient Satisfaction Score:\nIV vs PO Acetaminophen")
+meta::forest(m_sat, smlab = "Patient Satisfaction Score:\nIV vs PO Acetaminophen", label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"))
 dev.off()
 
 # 4. Time to Rescue Analgesia (minutes) - continuous
@@ -594,11 +613,11 @@ m_rescue <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                      sm = "MD",
                      random = TRUE,
                      method.tau = "REML",
-                     hakn = TRUE)
+                     method.random.ci = "HK")
 
 summary(m_rescue)
 pdf("Forest_TimeToRescue.pdf", width = 15, height = 8)
-meta::forest(m_rescue, smlab = "Time to Rescue Analgesia(Min):\nIV vs PO Acetaminophen")
+meta::forest(m_rescue, smlab = "Time to Rescue Analgesia(Min, label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)")):\nIV vs PO Acetaminophen")
 dev.off()
 
 # 5. QoR Score (24–48 h) - continuous
@@ -619,11 +638,11 @@ m_qor <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                   sm = "MD",
                   random = TRUE,
                   method.tau = "REML",
-                  hakn = TRUE)
+                  method.random.ci = "HK")
 
 summary(m_qor)
 pdf("Forest_QoR_Score.pdf", width = 15, height = 8)
-meta::forest(m_qor, smlab = "QoR Score (24–48 h):\nIV vs PO Acetaminophen")
+meta::forest(m_qor, smlab = "QoR Score (24–48 h, label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)")):\nIV vs PO Acetaminophen")
 dev.off()
 
 # 6. Rescue Analgesia Proportion - binary
@@ -642,11 +661,11 @@ m_rescue_prop <- metabin(event.e = events.e, n.e = n.e,
                          sm = "RR",
                          random = TRUE,
                          method.tau = "REML",
-                         hakn = TRUE)
+                         method.random.ci = "HK")
 
 summary(m_rescue_prop)
 pdf("Forest_RescueProportion.pdf", width = 15, height = 8)
-meta::forest(m_rescue_prop, smlab = "Need for Rescue Analgesia:\nIV vs PO Acetaminophen")
+meta::forest(m_rescue_prop, smlab = "Need for Rescue Analgesia:\nIV vs PO Acetaminophen", label.e = "Intravenous", label.c = "Oral", leftlabs = c("Study", "Total (IV)", "Mean (IV)", "SD (IV)", "Total (PO)", "Mean (PO)", "SD (PO)"))
 dev.off()
 
 # =========================================================================
@@ -654,13 +673,13 @@ dev.off()
 # =========================================================================
 
 # Load study characteristics
-study_char <- read_excel("Acetaminophen_IV_vs_PO_DataExtraction_final.xlsx", 
-                         sheet = 1, col_names = TRUE)
+study_char <- read_excel(XLSX_PATH,
+                         sheet = "Study_Characteristics", col_names = TRUE)
 
 # Focus on the three subgroup variables
 subgroup_cols <- study_char %>%
-  select(StudyID, 
-         any_of(c("SurgeryType", "Surgery_Type", "Surgery", 
+  select(StudyID,
+         any_of(c("SurgeryType", "Surgery_Type", "Surgery",
                   "ModeOfAnesthesia", "Anesthesia_Mode", "Anesthesia",
                   "IV_Acetaminophen_1stDoseTiming", "IV_DoseTiming", "IV_Timing",
                   "PO_Acetaminophen_1stDoseTiming", "PO_DoseTiming", "PO_Timing")))
@@ -669,18 +688,18 @@ subgroup_cols <- study_char %>%
 study_char <- study_char %>%
   mutate(
     Timing_Combined = case_when(
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Intraoperative" ~ "Preop PO + Intraop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Postoperative" ~ "Preop PO + Postop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Postoperative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Postoperative" &
         IV_Acetaminophen_1stDoseTiming == "Postoperative" ~ "Postop PO + Postop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Preoparative" ~ "Preop PO + Preop IV",
-      
+
       TRUE ~ "Other / Mixed"
     )
   )
@@ -692,7 +711,7 @@ pain_sub <- pain_rest %>%
 # Meta-analysis for all groups of different combinations of acetaminophen administration timing
 
 run_timing_subgroup <- function(time_prefix, time_label) {
-  
+
   dat <- pain_sub %>%
     select(StudyID, Timing_Combined, PainScale,
            IV_n   = paste0("Pain_", time_prefix, "_IV_n"),
@@ -709,14 +728,14 @@ run_timing_subgroup <- function(time_prefix, time_label) {
       PO_mean_10 = if_else(Scale_Type == "0-100", PO_mean / 10, PO_mean),
       PO_sd_10   = if_else(Scale_Type == "0-100", PO_sd / 10, PO_sd)
     )
-  
+
   cat("\n=== Subgroup Analysis:", time_label, "(k =", nrow(dat), ") ===\n")
-  
+
   if(nrow(dat) < 2) {
     cat("→ Insufficient studies for subgroup analysis\n")
     return(NULL)
   }
-  
+
   m_sub <- metacont(n.e = IV_n, mean.e = IV_mean_10, sd.e = IV_sd_10,
                     n.c = PO_n, mean.c = PO_mean_10, sd.c = PO_sd_10,
                     studlab = StudyID,
@@ -724,14 +743,14 @@ run_timing_subgroup <- function(time_prefix, time_label) {
                     sm = "MD",
                     random = TRUE,
                     method.tau = "REML",
-                    hakn = TRUE,
+                    method.random.ci = "HK",
                     subgroup = Timing_Combined,
                     test.subgroup = TRUE)
-  
+
   print(summary(m_sub))
-  
+
   # Subgroup forest plot
-  pdf(paste0("Subgroup_PainRest_", time_prefix, "_by_TimingCombined.pdf"), 
+  pdf(paste0("Subgroup_PainRest_", time_prefix, "_by_TimingCombined.pdf"),
       width = 16, height = 10)
   meta::forest(m_sub,
                smlab = paste("Pain at Rest", time_label, "\nby Timing"),
@@ -739,7 +758,7 @@ run_timing_subgroup <- function(time_prefix, time_label) {
                col.square = "#4575b4",
                col.diamond = "#d73027")
   dev.off()
-  
+
   invisible(m_sub)
 }
 
@@ -754,18 +773,18 @@ run_timing_subgroup("gt24h",   ">24 Hours")
 study_char <- study_char %>%
   mutate(
     Timing_Combined = case_when(
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Intraoperative" ~ "Preop PO + Intraop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Postoperative" ~ "Preop PO + Postop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Postoperative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Postoperative" &
         IV_Acetaminophen_1stDoseTiming == "Postoperative" ~ "Postop PO + Postop IV",
-      
-      PO_Acetaminophen_1stDoseTiming == "Preoparative" & 
+
+      PO_Acetaminophen_1stDoseTiming == "Preoparative" &
         IV_Acetaminophen_1stDoseTiming == "Preoparative" ~ "Preop PO + Preop IV",
-      
+
       TRUE ~ "Other / Mixed"
     )
   )
@@ -777,7 +796,7 @@ opioid_sub <- opioid_24h %>%
 # Subgroup analysis function for opioid MME
 run_opioid_timing_subgroup <- function() {
   cat("=== Subgroup Analysis: Opioid MME 0–24 h by Timing Combined ===\n")
-  
+
   m_sub <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                     n.c = PO_n, mean.c = PO_mean, sd.c = PO_sd,
                     studlab = StudyID,
@@ -785,14 +804,14 @@ run_opioid_timing_subgroup <- function() {
                     sm = "MD",
                     random = TRUE,
                     method.tau = "REML",
-                    hakn = TRUE,
+                    method.random.ci = "HK",
                     subgroup = Timing_Combined,
                     test.subgroup = TRUE)
-  
+
   print(summary(m_sub))
-  
+
   # Subgroup forest plot
-  pdf("Subgroup_Opioid_MME_0-24h_by_TimingCombined.pdf", 
+  pdf("Subgroup_Opioid_MME_0-24h_by_TimingCombined.pdf",
       width = 16, height = 9)
   meta::forest(m_sub,
                smlab = "24h Postop Opioid (MME) \nby Timing Combined",
@@ -800,7 +819,7 @@ run_opioid_timing_subgroup <- function() {
                col.square = "#4575b4",
                col.diamond = "#d73027")
   dev.off()
-  
+
   invisible(m_sub)
 }
 
@@ -809,7 +828,7 @@ m_opioid_timing <- run_opioid_timing_subgroup()
 # Continuous outcomes
 run_continuous_subgroup <- function(data, outcome_name) {
   cat("\n=== Subgroup Analysis:", outcome_name, "by Timing Combined ===\n")
-  
+
   m_sub <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                     n.c = PO_n, mean.c = PO_mean, sd.c = PO_sd,
                     studlab = StudyID,
@@ -817,13 +836,13 @@ run_continuous_subgroup <- function(data, outcome_name) {
                     sm = "MD",
                     random = TRUE,
                     method.tau = "REML",
-                    hakn = TRUE,
+                    method.random.ci = "HK",
                     subgroup = Timing_Combined,
                     test.subgroup = TRUE)
-  
+
   print(summary(m_sub))
-  
-  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_Timing.pdf"), 
+
+  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_Timing.pdf"),
       width = 16, height = 9)
   meta::forest(m_sub,
                smlab = paste(outcome_name, "by Timing Combined"),
@@ -887,7 +906,7 @@ run_continuous_subgroup(m_rescue$data %>% left_join(study_char %>% select(StudyI
 # Binary outcome: PONV
 run_binary_subgroup <- function(data, outcome_name) {
   cat("\n=== Subgroup Analysis:", outcome_name, "by Timing Combined ===\n")
-  
+
   m_sub <- metabin(event.e = events.e, n.e = n.e,
                    event.c = events.c, n.c = n.c,
                    studlab = StudyID,
@@ -895,13 +914,13 @@ run_binary_subgroup <- function(data, outcome_name) {
                    sm = "RR",
                    random = TRUE,
                    method.tau = "REML",
-                   hakn = TRUE,
+                   method.random.ci = "HK",
                    subgroup = Timing_Combined,
                    test.subgroup = TRUE)
-  
+
   print(summary(m_sub))
-  
-  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_Timing.pdf"), 
+
+  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_Timing.pdf"),
       width = 16, height = 9)
   meta::forest(m_sub,
                smlab = paste(outcome_name, "by Timing Combined"),
@@ -929,11 +948,11 @@ run_binary_subgroup(ponv_vomiting_sub, "PONV Vomiting")
 
 # Merge subgroup variables from Sheet 1
 pain_sub <- pain_rest %>%
-  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia), 
+  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia),
             by = "StudyID")
 
 run_pain_subgroup <- function(time_prefix, time_label, subgroup_var) {
-  
+
   # Rename the subgroup column to a fixed name "subgroup"
   dat <- pain_sub %>%
     select(StudyID, PainScale, subgroup = !!sym(subgroup_var),
@@ -952,9 +971,9 @@ run_pain_subgroup <- function(time_prefix, time_label, subgroup_var) {
       PO_mean_10 = if_else(Scale_Type == "0-100", PO_mean / 10, PO_mean),
       PO_sd_10   = if_else(Scale_Type == "0-100", PO_sd / 10, PO_sd)
     )
-  
+
   cat("\n=== Pain at Rest", time_label, "by", subgroup_var, "(k =", nrow(dat), ") ===\n")
-  
+
   m <- metacont(n.e = IV_n, mean.e = IV_mean_10, sd.e = IV_sd_10,
                 n.c = PO_n, mean.c = PO_mean_10, sd.c = PO_sd_10,
                 studlab = StudyID,
@@ -962,13 +981,13 @@ run_pain_subgroup <- function(time_prefix, time_label, subgroup_var) {
                 sm = "MD",
                 random = TRUE,
                 method.tau = "REML",
-                hakn = TRUE,
+                method.random.ci = "HK",
                 subgroup = subgroup,     # fixed name
                 test.subgroup = TRUE)
-  
+
   print(summary(m))
-  
-  pdf(paste0("Subgroup_PainRest_", time_prefix, "_by_", subgroup_var, ".pdf"), 
+
+  pdf(paste0("Subgroup_PainRest_", time_prefix, "_by_", subgroup_var, ".pdf"),
       width = 16, height = 10)
   meta::forest(m,
                smlab = paste("Pain at Rest", time_label, "\nby", subgroup_var),
@@ -1001,12 +1020,12 @@ run_pain_subgroup("gt24h", ">24 Hours", "ModeOfAnesthesia")
 
 # Merge subgroup variables from Sheet 1
 pain_move_sub <- pain_move %>%
-  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia), 
+  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia),
             by = "StudyID")
 
 # Same function that worked for Timing_Combined
 run_pain_move_subgroup <- function(time_prefix, time_label, subgroup_var) {
-  
+
   dat <- pain_move_sub %>%
     select(StudyID, PainScale, subgroup = !!sym(subgroup_var),
            IV_n   = paste0("Pain_", time_prefix, "_IV_n"),
@@ -1024,9 +1043,9 @@ run_pain_move_subgroup <- function(time_prefix, time_label, subgroup_var) {
       PO_mean_10 = if_else(Scale_Type == "0-100", PO_mean / 10, PO_mean),
       PO_sd_10   = if_else(Scale_Type == "0-100", PO_sd / 10, PO_sd)
     )
-  
+
   cat("\n=== Pain on Movement", time_label, "by", subgroup_var, "(k =", nrow(dat), ") ===\n")
-  
+
   m <- metacont(n.e = IV_n, mean.e = IV_mean_10, sd.e = IV_sd_10,
                 n.c = PO_n, mean.c = PO_mean_10, sd.c = PO_sd_10,
                 studlab = StudyID,
@@ -1034,13 +1053,13 @@ run_pain_move_subgroup <- function(time_prefix, time_label, subgroup_var) {
                 sm = "MD",
                 random = TRUE,
                 method.tau = "REML",
-                hakn = TRUE,
+                method.random.ci = "HK",
                 subgroup = subgroup,
                 test.subgroup = TRUE)
-  
+
   print(summary(m))
-  
-  pdf(paste0("Subgroup_PainMove_", time_prefix, "_by_", subgroup_var, ".pdf"), 
+
+  pdf(paste0("Subgroup_PainMove_", time_prefix, "_by_", subgroup_var, ".pdf"),
       width = 16, height = 10)
   meta::forest(m,
                smlab = paste("Pain on Movement", time_label, "\nby", subgroup_var),
@@ -1068,21 +1087,21 @@ run_pain_move_subgroup("gt24h", ">24 Hours", "ModeOfAnesthesia")
 
 # Merge subgroup variables from Sheet 1
 opioid_sub <- opioid_24h %>%
-  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia), 
+  left_join(study_char %>% select(StudyID, SurgeryType, ModeOfAnesthesia),
             by = "StudyID")
 
 # Same function that worked for pain at rest
 run_opioid_subgroup <- function(subgroup_var) {
-  
+
   dat <- opioid_sub %>%
     select(StudyID, subgroup = !!sym(subgroup_var),
            IV_n = IV_n, IV_mean = IV_mean, IV_sd = IV_sd,
            PO_n = PO_n, PO_mean = PO_mean, PO_sd = PO_sd) %>%
     filter(!is.na(IV_n) & !is.na(PO_n)) %>%
     filter(!is.na(subgroup))
-  
+
   cat("\n=== 24-h Opioid MME by", subgroup_var, "(k =", nrow(dat), ") ===\n")
-  
+
   m <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                 n.c = PO_n, mean.c = PO_mean, sd.c = PO_sd,
                 studlab = StudyID,
@@ -1090,13 +1109,13 @@ run_opioid_subgroup <- function(subgroup_var) {
                 sm = "MD",
                 random = TRUE,
                 method.tau = "REML",
-                hakn = TRUE,
+                method.random.ci = "HK",
                 subgroup = subgroup,
                 test.subgroup = TRUE)
-  
+
   print(summary(m))
-  
-  pdf(paste0("Subgroup_Opioid_MME_0-24h_by_", subgroup_var, ".pdf"), 
+
+  pdf(paste0("Subgroup_Opioid_MME_0-24h_by_", subgroup_var, ".pdf"),
       width = 16, height = 9)
   meta::forest(m,
                smlab = paste("24h Postop Opioid (MME)\nby", subgroup_var),
@@ -1118,9 +1137,9 @@ run_subgroup_cont <- function(data, outcome_name, subgroup_var) {
            PO_n = PO_n, PO_mean = PO_mean, PO_sd = PO_sd) %>%
     filter(!is.na(IV_n) & !is.na(PO_n)) %>%
     filter(!is.na(subgroup))
-  
+
   cat("\n=== ", outcome_name, "by", subgroup_var, "(k =", nrow(dat), ") ===\n")
-  
+
   m <- metacont(n.e = IV_n, mean.e = IV_mean, sd.e = IV_sd,
                 n.c = PO_n, mean.c = PO_mean, sd.c = PO_sd,
                 studlab = StudyID,
@@ -1128,13 +1147,13 @@ run_subgroup_cont <- function(data, outcome_name, subgroup_var) {
                 sm = "MD",
                 random = TRUE,
                 method.tau = "REML",
-                hakn = TRUE,
+                method.random.ci = "HK",
                 subgroup = subgroup,
                 test.subgroup = TRUE)
-  
+
   print(summary(m))
-  
-  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_", subgroup_var, ".pdf"), 
+
+  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_", subgroup_var, ".pdf"),
       width = 16, height = 10)
   meta::forest(m,
                smlab = paste(outcome_name, "\nby", subgroup_var),
@@ -1152,9 +1171,9 @@ run_subgroup_bin <- function(data, outcome_name, subgroup_var) {
            events.e, n.e, events.c, n.c) %>%
     filter(!is.na(events.e) & !is.na(n.e) & !is.na(events.c) & !is.na(n.c)) %>%
     filter(!is.na(subgroup))
-  
+
   cat("\n=== ", outcome_name, "by", subgroup_var, "(k =", nrow(dat), ") ===\n")
-  
+
   m <- metabin(event.e = events.e, n.e = n.e,
                event.c = events.c, n.c = n.c,
                studlab = StudyID,
@@ -1162,13 +1181,13 @@ run_subgroup_bin <- function(data, outcome_name, subgroup_var) {
                sm = "RR",
                random = TRUE,
                method.tau = "REML",
-               hakn = TRUE,
+               method.random.ci = "HK",
                subgroup = subgroup,
                test.subgroup = TRUE)
-  
+
   print(summary(m))
-  
-  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_", subgroup_var, ".pdf"), 
+
+  pdf(paste0("Subgroup_", gsub(" ", "_", outcome_name), "_by_", subgroup_var, ".pdf"),
       width = 16, height = 10)
   meta::forest(m,
                smlab = paste(outcome_name, "\nby", subgroup_var),
@@ -1208,10 +1227,10 @@ run_subgroup_cont(m_rescue$data %>% left_join(subgroup_data, by = "StudyID"), "T
 
 assess_pub_bias <- function(model, name) {
   cat("\n=== Publication Bias:", name, "(k =", model$k, ") ===\n")
-  
+
   # Funnel plot
   funnel(model, main = paste("Funnel Plot -", name))
-  
+
   # Egger’s test (only if k >= 3)
   if (model$k >= 3) {
     egger <- metabias(model, method.bias = "Egger")
@@ -1219,7 +1238,7 @@ assess_pub_bias <- function(model, name) {
   } else {
     cat("→ Egger's test not performed (k < 3)\n")
   }
-  
+
   # Save PDF
   pdf(paste0("Funnel_", gsub(" ", "_", name), ".pdf"), width = 8, height = 7)
   funnel(model, main = paste("Funnel Plot -", name))
@@ -1352,13 +1371,44 @@ tsa_sens3 <- RTSA(
 cat("\n=== SENSITIVITY 3: MCID = 10 mg, 90% power ===\n")
 print(tsa_sens3)
 
+# Persist opioid TSA sensitivity plots (Reviewer 4: report numerical alt MCID/power)
+# Captions force RE DL+HKSJ (RTSA footer may say Fixed-effect when tau2=0)
+dir.create("figures_Fig5", showWarnings = FALSE)
+.save_opioid_tsa_sens <- function(obj, stem, title, mc, beta) {
+  p <- plot(obj, model = "random", type = "classic", theme = "classic")
+  power_pct <- round((1 - beta) * 100)
+  beta_pct  <- round(beta * 100)
+  p$labels$caption <- paste0(
+    "Retrospective TSA; alpha 5%, beta ", beta_pct, "% (", power_pct, "% power), ",
+    "O'Brien-Fleming (esOF); MCID ", mc, " mg oral MME.\n",
+    "Methods: Random-effects DL+HKSJ only (fixed = FALSE). Futility boundaries: none."
+  )
+  p <- p + ggplot2::labs(title = title) +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 11, face = "bold"),
+                   plot.caption = ggplot2::element_text(size = 7.5, hjust = 0))
+  ggplot2::ggsave(file.path("figures_Fig5", paste0(stem, ".png")), p, width = 8, height = 6.2, dpi = 300)
+  ggplot2::ggsave(file.path("figures_Fig5", paste0(stem, ".pdf")), p, width = 8, height = 6.2)
+  sink(file.path("figures_Fig5", paste0(stem, "_print.txt"))); print(obj); sink()
+  writeLines(
+    sprintf("RIS=%s; accrued N=%s; RE DL+HKSJ; fixed=FALSE; mc=%s; beta=%s; futility=none",
+            round(as.numeric(obj$results$SMA_RIS)), round(as.numeric(obj$results$AIS)), mc, beta),
+    file.path("figures_Fig5", paste0(stem, "_RIS.txt"))
+  )
+  cat("Wrote figures_Fig5/", stem, "\n", sep = "")
+}
+.save_opioid_tsa_sens(tsa_sens1, "TSA_opioid_24h_MCID5mg",
+  "TSA sensitivity - 24-h opioid (MCID 5 mg oral MME, 80% power)", 5, 0.20)
+.save_opioid_tsa_sens(tsa_sens2, "TSA_opioid_24h_MCID15mg",
+  "TSA sensitivity - 24-h opioid (MCID 15 mg oral MME, 80% power)", 15, 0.20)
+.save_opioid_tsa_sens(tsa_sens3, "TSA_opioid_24h_90power",
+  "TSA sensitivity - 24-h opioid (MCID 10 mg oral MME, 90% power)", 10, 0.10)
 
 # Prepare Pain at Rest 0-2 h data (with scale standardization)
 
 pain_rest_0to2h <- dat_list[["Pain_Scores_Rest"]] %>%
   filter(!is.na(Pain_0to2h_IV_mean) & !is.na(Pain_0to2h_PO_mean)) %>%
   left_join(
-    dat_list[["Study_Characteristics"]] %>% 
+    dat_list[["Study_Characteristics"]] %>%
       select(StudyID, `Publication Year`),
     by = "StudyID"
   ) %>%
@@ -1366,15 +1416,15 @@ pain_rest_0to2h <- dat_list[["Pain_Scores_Rest"]] %>%
   mutate(
     # Standardize to 0-10 scale
     scale_factor = ifelse(grepl("100", PainScale) | grepl("VAS 0-100", PainScale, ignore.case = TRUE), 10, 1),
-    
+
     mI  = Pain_0to2h_IV_mean / scale_factor,
     sdI = Pain_0to2h_IV_sd   / scale_factor,
     nI  = Pain_0to2h_IV_n,
-    
+
     mC  = Pain_0to2h_PO_mean / scale_factor,
     sdC = Pain_0to2h_PO_sd   / scale_factor,
     nC  = Pain_0to2h_PO_n,
-    
+
     study = StudyID
   ) %>%
   select(study, mI, sdI, nI, mC, sdC, nC, PainScale, `Publication Year`) %>%
@@ -1411,7 +1461,7 @@ plot(tsa_pain_0to2h)
 pain_rest_2to6h <- dat_list[["Pain_Scores_Rest"]] %>%
   filter(!is.na(Pain_2to6h_IV_mean) & !is.na(Pain_2to6h_PO_mean)) %>%
   left_join(
-    dat_list[["Study_Characteristics"]] %>% 
+    dat_list[["Study_Characteristics"]] %>%
       select(StudyID, `Publication Year`),
     by = "StudyID"
   ) %>%
@@ -1419,15 +1469,15 @@ pain_rest_2to6h <- dat_list[["Pain_Scores_Rest"]] %>%
   mutate(
     # Standardize to 0-10 scale (handles any VAS 0-100 studies)
     scale_factor = ifelse(grepl("100", PainScale) | grepl("VAS 0-100", PainScale, ignore.case = TRUE), 10, 1),
-    
+
     mI  = Pain_2to6h_IV_mean / scale_factor,
     sdI = Pain_2to6h_IV_sd   / scale_factor,
     nI  = Pain_2to6h_IV_n,
-    
+
     mC  = Pain_2to6h_PO_mean / scale_factor,
     sdC = Pain_2to6h_PO_sd   / scale_factor,
     nC  = Pain_2to6h_PO_n,
-    
+
     study = StudyID
   ) %>%
   select(study, mI, sdI, nI, mC, sdC, nC, PainScale, `Publication Year`) %>%
@@ -1464,7 +1514,7 @@ plot(tsa_pain_2to6h)
 pain_rest_6to24h <- dat_list[["Pain_Scores_Rest"]] %>%
   filter(!is.na(Pain_6to24h_IV_mean) & !is.na(Pain_6to24h_PO_mean)) %>%
   left_join(
-    dat_list[["Study_Characteristics"]] %>% 
+    dat_list[["Study_Characteristics"]] %>%
       select(StudyID, `Publication Year`),
     by = "StudyID"
   ) %>%
@@ -1472,15 +1522,15 @@ pain_rest_6to24h <- dat_list[["Pain_Scores_Rest"]] %>%
   mutate(
     # Standardize to 0-10 scale
     scale_factor = ifelse(grepl("100", PainScale) | grepl("VAS 0-100", PainScale, ignore.case = TRUE), 10, 1),
-    
+
     mI  = Pain_6to24h_IV_mean / scale_factor,
     sdI = Pain_6to24h_IV_sd   / scale_factor,
     nI  = Pain_6to24h_IV_n,
-    
+
     mC  = Pain_6to24h_PO_mean / scale_factor,
     sdC = Pain_6to24h_PO_sd   / scale_factor,
     nC  = Pain_6to24h_PO_n,
-    
+
     study = StudyID
   ) %>%
   select(study, mI, sdI, nI, mC, sdC, nC, PainScale, `Publication Year`) %>%
@@ -1516,7 +1566,7 @@ plot(tsa_pain_6to24h)
 pain_rest_gt24h <- dat_list[["Pain_Scores_Rest"]] %>%
   filter(!is.na(Pain_gt24h_IV_mean) & !is.na(Pain_gt24h_PO_mean)) %>%
   left_join(
-    dat_list[["Study_Characteristics"]] %>% 
+    dat_list[["Study_Characteristics"]] %>%
       select(StudyID, `Publication Year`),
     by = "StudyID"
   ) %>%
@@ -1524,15 +1574,15 @@ pain_rest_gt24h <- dat_list[["Pain_Scores_Rest"]] %>%
   mutate(
     # Standardize to 0-10 scale
     scale_factor = ifelse(grepl("100", PainScale) | grepl("VAS 0-100", PainScale, ignore.case = TRUE), 10, 1),
-    
+
     mI  = Pain_gt24h_IV_mean / scale_factor,
     sdI = Pain_gt24h_IV_sd   / scale_factor,
     nI  = Pain_gt24h_IV_n,
-    
+
     mC  = Pain_gt24h_PO_mean / scale_factor,
     sdC = Pain_gt24h_PO_sd   / scale_factor,
     nC  = Pain_gt24h_PO_n,
-    
+
     study = StudyID
   ) %>%
   select(study, mI, sdI, nI, mC, sdC, nC, PainScale, `Publication Year`) %>%
@@ -1562,3 +1612,40 @@ print(tsa_pain_gt24h)
 
 # TSA boundary plot
 plot(tsa_pain_gt24h)
+
+# ===== FIG5_R1_EXPORT_BLOCK (reviewer R1: RE DL+HKSJ only; no fixed-effect panels) =====
+# Run after TSA objects exist, or source export_Fig5_TSA.R standalone.
+if (exists("tsa_opioid")) {
+  dir.create("figures_Fig5", showWarnings = FALSE)
+  save_tsa <- function(obj, path_stem, title) {
+    p <- plot(obj, model = "random", type = "classic", theme = "classic")
+    # Force RE caption (RTSA sometimes prints Fixed-effect in footer)
+    cap <- paste0(
+      "Retrospective TSA; alpha 5%, beta 20%, esOF spending.\n",
+      "Methods: Random-effects DL+HKSJ only (fixed = FALSE)."
+    )
+    p <- p + ggplot2::labs(title = title, caption = cap)
+    ggplot2::ggsave(paste0(path_stem, ".png"), p, width = 8, height = 6.2, dpi = 300)
+    ggplot2::ggsave(paste0(path_stem, ".pdf"), p, width = 8, height = 6.2)
+  }
+  save_tsa(tsa_opioid, "figures_Fig5/Fig5a_TSA_opioid_24h",
+           "Fig 5a. TSA — 24-h opioid (MCID 10 mg oral MME)")
+  if (exists("tsa_pain_0to2h")) save_tsa(tsa_pain_0to2h, "figures_Fig5/Fig5b_TSA_pain_0to2h",
+           "Fig 5b. TSA — Pain at rest 0–2 h (MCID 1.0)")
+  if (exists("tsa_pain_2to6h")) save_tsa(tsa_pain_2to6h, "figures_Fig5/Fig5c_TSA_pain_2to6h",
+           "Fig 5c. TSA — Pain at rest 2–6 h (MCID 1.0)")
+  if (exists("tsa_pain_6to24h")) save_tsa(tsa_pain_6to24h, "figures_Fig5/Fig5d_TSA_pain_6to24h",
+           "Fig 5d. TSA — Pain at rest 6–24 h (MCID 1.0)")
+  if (exists("tsa_pain_gt24h")) save_tsa(tsa_pain_gt24h, "figures_Fig5/Fig5e_TSA_pain_gt24h",
+           "Fig 5e. TSA — Pain at rest >24 h (MCID 1.0)")
+}
+# ===== END FIG5_R1_EXPORT_BLOCK =====
+
+# ===== REVIEWER R1 SENSITIVITIES (source after primary models) =====
+# Same-timing preoperative pain 0–2 h; leave-uncertain MME; Patel LOO.
+# Standalone: source("R1_reviewer_sensitivities.R")
+if (file.exists("R1_reviewer_sensitivities.R") && !exists("R1_SENSITIVITIES_DONE")) {
+  # Optional: uncomment to auto-run when sourcing this file end-to-end
+  # source("R1_reviewer_sensitivities.R"); R1_SENSITIVITIES_DONE <- TRUE
+}
+
