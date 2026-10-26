@@ -1,10 +1,40 @@
 # SRMA Acetaminophen — R analysis code (BMC Anesthesiology)
 
+Supporting dataset for the systematic review, meta-analysis, subgroup analysis and trial sequential analysis of randomised trials of intravenous versus oral perioperative acetaminophen for postoperative acute pain in adults.
+
 | | |
 |---|---|
 | PROSPERO | [CRD420251157230](https://www.crd.york.ac.uk/prospero/display_record.php?ID=CRD420251157230) |
-| Licence | MIT (see `LICENSE`) — analysis code only; RCT publications remain copyright of their publishers |
-| Corresponding author | Hei Yeung Law (`LHY624@ha.org.hk`) |
+| Dataset file | [`Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx`](Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx) |
+| Version | 1.3 (20 Oct 2026) |
+| Licence | MIT (this extraction and any analysis code). The 16 source RCT publications remain copyright of their publishers. |
+| Corresponding author | Hei Yeung Law, Department of Anaesthesiology, Perioperative and Pain Medicine, Queen Elizabeth Hospital, Hong Kong SAR. `LHY624@ha.org.hk` |
+
+This is the **minimal dataset** needed to reproduce the pooled estimates. It is trial-level (one or more rows per RCT), not individual-participant data, except where Wilson 2019 summaries were computed from author-supplied individual participant data and then stored as arm-level means/SDs or event counts.
+
+These files are released to support reproducibility of a systematic review. They are **not** a clinical guideline, product label, or dosing reference. Do not use them to treat patients.
+
+## Files in this folder
+
+| File | Role |
+|---|---|
+| `Acetaminophen_IV_vs_PO_DataExtraction_revision.xlsx` | Machine-readable extraction (sheets listed below) |
+| `README.md` | This file |
+| `LICENSE` | MIT licence for the extraction |
+
+Do **not** treat the workbook as a substitute for the source papers. Always cite the original RCT.
+
+## Workbook sheets
+
+1. **README** — dataset metadata, direction of effects, imputation rules.
+2. **Study_Characteristics** — 16 RCTs; surgery, anaesthesia, n, regimen, funding, conflicts.
+3. **Risk_of_Bias** — Cochrane RoB 2 domain judgements and signalling notes.
+4. **Pain_Scores_Rest** — arm n / mean / SD by postoperative window (0–2 h, 2–6 h, 6–24 h, >24 h).
+5. **Pain_Scores_Movement** — same structure, movement / dynamic pain.
+6. **Opioid_Consumption_MME** — cumulative opioid consumption converted to **oral** morphine milligram equivalents.
+7. **PONV** — dichotomous nausea / vomiting / unspecified PONV (events / total).
+8. **Other_Secondaries** — PACU stay, hospital stay, time to rescue, rescue proportion, satisfaction, QoR-15.
+9. **Data_Dictionary** — column definitions, units, coding.
 
 ## Statistical defaults (do not change when reproducing)
 
